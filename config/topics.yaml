@@ -1,0 +1,78 @@
+# Темы для мониторинга новостей
+# Каждая тема содержит ключевые слова и контекст для скоринга
+
+topics:
+  - name: "Bicycle Insurance"
+    keywords:
+      - "bicycle insurance"
+      - "bike insurance"
+      - "e-bike insurance"
+      - "cycling insurance"
+      - "bike theft"
+      - "bicycle accident"
+    context: "bicycle and e-bike insurance industry"
+    hashtags:
+      - "#BikeInsurance"
+      - "#CyclingInsurance"
+
+  - name: "E-Bike Industry"
+    keywords:
+      - "e-bike"
+      - "electric bicycle"
+      - "ebike"
+      - "electric bike"
+      - "e-bike sales"
+      - "e-bike regulations"
+    context: "electric bicycle industry and market trends"
+    hashtags:
+      - "#EBike"
+      - "#ElectricBike"
+
+  - name: "Cycling Safety"
+    keywords:
+      - "cycling safety"
+      - "bike safety"
+      - "bicycle helmet"
+      - "bike lane"
+      - "cyclist safety"
+      - "bicycle accident"
+    context: "cycling safety news and infrastructure"
+    hashtags:
+      - "#CyclingSafety"
+      - "#BikeLife"
+
+  - name: "Urban Mobility"
+    keywords:
+      - "urban mobility"
+      - "micromobility"
+      - "bike sharing"
+      - "cycling infrastructure"
+      - "bike commute"
+    context: "urban transportation and cycling infrastructure"
+    hashtags:
+      - "#UrbanMobility"
+      - "#Micromobility"
+
+# Настройки скоринга
+scoring:
+  freshness_weight: 0.25
+  virality_weight: 0.25
+  relevance_weight: 0.30
+  sentiment_weight: 0.10
+  uniqueness_weight: 0.10
+
+# Настройки публикации
+publishing:
+  posts_per_run: 3
+  min_hot_score: 0.4
+  schedule:
+    - "09:00"  # Утро EST
+    - "13:00"  # Обед EST
+    - "18:00"  # Вечер EST
+
+# RSS фиды
+rss_feeds:
+  BikeRadar: "https://www.bikeradar.com/feed/"
+  CyclingTips: "https://cyclingtips.com/feed/"
+  "Road.cc": "https://road.cc/feed"
+  Electrek: "https://electrek.co/feed/"
