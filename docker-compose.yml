@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Python API для скоринга и рерайта
+  scoring-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news-curator-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - news-curator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # n8n workflow orchestrator
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: news-curator-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/New_York
+
+      # API ключи для n8n
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEWSAPI_KEY=${NEWSAPI_KEY}
+      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
+      - TWITTER_CONSUMER_KEY=${TWITTER_CONSUMER_KEY}
+      - TWITTER_CONSUMER_SECRET=${TWITTER_CONSUMER_SECRET}
+      - TWITTER_ACCESS_TOKEN=${TWITTER_ACCESS_TOKEN}
+      - TWITTER_ACCESS_TOKEN_SECRET=${TWITTER_ACCESS_TOKEN_SECRET}
+
+      # Python API URL (internal)
+      - SCORING_API_URL=http://scoring-api:8000
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/.n8n/workflows:ro
+    restart: unless-stopped
+    networks:
+      - news-curator
+    depends_on:
+      - scoring-api
+
+volumes:
+  n8n_data:
+    driver: local
+
+networks:
+  news-curator:
+    driver: bridge

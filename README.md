@@ -33,20 +33,60 @@ hot-news-agent/
 | Сентимент | 0.10 | Абсолютный sentiment score |
 | Уникальность | 0.10 | 1 - max similarity к уже опубликованным |
 
-## Установка
+## 🚀 Быстрый старт
 
+### Production (Docker)
+```bash
+# 1. Скопировать .env.example и заполнить API ключи
+cp .env.example .env
+nano .env
+
+# 2. Запустить через Docker Compose
+docker-compose up -d
+
+# 3. Открыть n8n UI
+open http://localhost:5678
+```
+
+**Полная инструкция:** [DEPLOYMENT.md](DEPLOYMENT.md)
+
+### Development (Python)
 ```bash
 pip install -r requirements.txt
 cp config/.env.example config/.env
 # Заполнить API ключи в .env
 ```
 
-## API
+## 📊 Архитектура полной версии
+
+```
+n8n (Orchestrator) → Python API (FastAPI) → OpenAI/Twitter APIs
+```
+
+**Компоненты:**
+- **n8n**: workflow orchestration, сбор новостей, публикация
+- **Python API**: скоринг (5 сигналов), рерайт через LLM
+- **Docker Compose**: упаковка обоих сервисов
+
+## API Endpoints
+
+### Python API (http://localhost:8000)
+
+- `POST /score` - скоринг новостей
+- `POST /rewrite` - генерация твитов
+- `POST /score-and-rewrite` - комбо (используется в n8n)
+- `GET /health` - health check
+
+## Используемые сервисы
 
 - NewsAPI.org — 100 запросов/день бесплатно
 - Twitter/X Developer — Basic tier, 1500 твитов/мес
-- OpenAI API — для рерайта и embeddings
+- OpenAI API — embeddings + GPT-4o-mini для рерайта
 
-## Roadmap
+**Стоимость:** $10-25/мес (VPS + OpenAI)
 
-См. [ROADMAP.md](ROADMAP.md) — детальный план с блоками, статусами и следующими шагами.
+## Документация
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) — полная инструкция по развертыванию
+- [ROADMAP.md](ROADMAP.md) — детальный план разработки
+- [config/topics.yaml](config/topics.yaml) — настройка тем и ключевых слов
