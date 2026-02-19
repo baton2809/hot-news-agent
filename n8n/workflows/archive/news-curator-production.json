@@ -1,0 +1,299 @@
+{
+  "name": "News Curator (Production - Python API)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 8
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule (8h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://electrek.co/feed/"
+      },
+      "id": "rss-electrek",
+      "name": "RSS Electrek",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, -100]
+    },
+    {
+      "parameters": {
+        "url": "https://road.cc/feed"
+      },
+      "id": "rss-roadcc",
+      "name": "RSS Road.cc",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://www.bikeradar.com/feed/"
+      },
+      "id": "rss-bikeradar",
+      "name": "RSS BikeRadar",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=\"e-bike\" OR \"electric bicycle\" OR \"cycling safety\" OR \"bike insurance\""
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "pageSize",
+              "value": "20"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{$env.NEWSAPI_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "newsapi",
+      "name": "NewsAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Нормализация данных из разных источников\nconst items = $input.all();\nconst normalized = [];\n\nfor (const item of items) {\n  const json = item.json;\n  \n  // RSS items\n  if (json.title && json.link && json.pubDate) {\n    normalized.push({\n      json: {\n        title: json.title || '',\n        summary: json.contentSnippet || json.description || '',\n        url: json.link || '',\n        published_at: json.isoDate || json.pubDate || new Date().toISOString(),\n        source: 'rss',\n        shares: 0,\n        retweets: 0,\n        upvotes: 0\n      }\n    });\n  }\n  \n  // NewsAPI items\n  if (json.articles && Array.isArray(json.articles)) {\n    for (const article of json.articles) {\n      normalized.push({\n        json: {\n          title: article.title || '',\n          summary: article.description || '',\n          url: article.url || '',\n          published_at: article.publishedAt || new Date().toISOString(),\n          source: 'newsapi',\n          shares: 0,\n          retweets: 0,\n          upvotes: 0\n        }\n      });\n    }\n  }\n}\n\nreturn normalized;"
+      },
+      "id": "normalize-data",
+      "name": "Normalize Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 50]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SCORING_API_URL}}/score-and-rewrite",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "news",
+              "value": "={{$json}}"
+            },
+            {
+              "name": "topic_keywords",
+              "value": "=[\"e-bike\", \"electric bicycle\", \"cycling\", \"bike insurance\", \"bike safety\"]"
+            },
+            {
+              "name": "top_n",
+              "value": "=3"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "python-api-score",
+      "name": "Python API: Score & Rewrite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 50]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.hot_score}}",
+              "operation": "larger",
+              "value2": 0.4
+            }
+          ]
+        }
+      },
+      "id": "filter-quality",
+      "name": "Filter (score > 0.4)",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [900, 50]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Форматирование финального твита\nconst items = $input.all();\n\nconst formatted = items.map(item => {\n  const tweet = item.json.tweet;\n  const url = item.json.url;\n  const score = item.json.hot_score;\n  \n  // Добавляем ссылку в конец если есть место\n  let fullTweet = tweet;\n  if (tweet.length + url.length + 2 <= 280) {\n    fullTweet = `${tweet}\\n${url}`;\n  }\n  \n  return {\n    json: {\n      text: fullTweet,\n      title: item.json.title,\n      url: url,\n      hot_score: score,\n      tweet_only: tweet\n    }\n  };\n});\n\nreturn formatted;"
+      },
+      "id": "format-tweet",
+      "name": "Format Tweet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 50]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth1",
+        "text": "={{$json.text}}",
+        "additionalFields": {}
+      },
+      "id": "twitter-post",
+      "name": "Twitter Post",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1340, 50],
+      "credentials": {
+        "twitterOAuth1Api": {
+          "id": "1",
+          "name": "Twitter OAuth1 API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule (8h)": {
+      "main": [
+        [
+          {
+            "node": "RSS Electrek",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Road.cc",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS BikeRadar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NewsAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Electrek": {
+      "main": [
+        [
+          {
+            "node": "Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Road.cc": {
+      "main": [
+        [
+          {
+            "node": "Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS BikeRadar": {
+      "main": [
+        [
+          {
+            "node": "Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NewsAPI": {
+      "main": [
+        [
+          {
+            "node": "Normalize Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Data": {
+      "main": [
+        [
+          {
+            "node": "Python API: Score & Rewrite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python API: Score & Rewrite": {
+      "main": [
+        [
+          {
+            "node": "Filter (score > 0.4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter (score > 0.4)": {
+      "main": [
+        [
+          {
+            "node": "Format Tweet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Tweet": {
+      "main": [
+        [
+          {
+            "node": "Twitter Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-18T00:00:00.000Z",
+  "versionId": "1"
+}

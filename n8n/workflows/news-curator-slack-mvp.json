@@ -1,0 +1,238 @@
+{
+  "name": "News Curator - Slack Moderation MVP",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8b3c7f9e-1234-5678-9abc-def012345678",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=ebike&hl=en-US&gl=US&ceid=US:en",
+        "options": {}
+      },
+      "id": "a1b2c3d4-1234-5678-9abc-def012345679",
+      "name": "RSS - Google News E-bike",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://python-api:8000/api/score",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "news_items",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-1234-5678-9abc-def012345680",
+      "name": "Python API - Hot Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.hot_score }}",
+              "operation": "largerEqual",
+              "value2": 0.4
+            }
+          ]
+        }
+      },
+      "id": "c3d4e5f6-1234-5678-9abc-def012345681",
+      "name": "Filter - Hot Score >= 0.4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Sort by hot_score and take top 3-4\nconst items = $input.all();\nitems.sort((a, b) => b.json.hot_score - a.json.hot_score);\nconst top = items.slice(0, 4);\nreturn top;"
+      },
+      "id": "d4e5f6g7-1234-5678-9abc-def012345682",
+      "name": "Select Top 3-4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://python-api:8000/api/rewrite",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "topic",
+              "value": "e-bike industry news"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e5f6g7h8-1234-5678-9abc-def012345683",
+      "name": "Python API - Rewrite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://python-api:8000/api/slack/moderation",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "news_items",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6g7h8i9-1234-5678-9abc-def012345684",
+      "name": "Send to Slack - Moderation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEETS_SPREADSHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": "news_log",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now }}",
+            "title": "={{ $json.title }}",
+            "url": "={{ $json.link }}",
+            "hot_score": "={{ $json.hot_score }}",
+            "rewritten_text": "={{ $json.rewritten_text }}",
+            "status": "pending_moderation"
+          }
+        },
+        "options": {}
+      },
+      "id": "g7h8i9j0-1234-5678-9abc-def012345685",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1650, 300]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "RSS - Google News E-bike",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS - Google News E-bike": {
+      "main": [
+        [
+          {
+            "node": "Python API - Hot Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python API - Hot Score": {
+      "main": [
+        [
+          {
+            "node": "Filter - Hot Score >= 0.4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter - Hot Score >= 0.4": {
+      "main": [
+        [
+          {
+            "node": "Select Top 3-4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Top 3-4": {
+      "main": [
+        [
+          {
+            "node": "Python API - Rewrite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python API - Rewrite": {
+      "main": [
+        [
+          {
+            "node": "Send to Slack - Moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Slack - Moderation": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-02-19T10:00:00.000Z",
+  "versionId": "1"
+}

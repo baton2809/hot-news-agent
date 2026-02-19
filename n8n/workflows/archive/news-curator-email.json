@@ -1,0 +1,290 @@
+{
+  "name": "News Curator (Email)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 8
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule (8h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://electrek.co/feed/"
+      },
+      "id": "rss-electrek",
+      "name": "RSS Electrek",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, -100]
+    },
+    {
+      "parameters": {
+        "url": "https://road.cc/feed"
+      },
+      "id": "rss-roadcc",
+      "name": "RSS Road.cc",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "e-bike OR \"electric bicycle\" OR \"cycling safety\""
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "pageSize",
+              "value": "10"
+            },
+            {
+              "name": "apiKey",
+              "value": "7d9eb9ba904746bb92c07c7707b58ae7"
+            }
+          ]
+        }
+      },
+      "id": "newsapi",
+      "name": "NewsAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "merge",
+      "name": "Merge All",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [480, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst now = new Date();\n\nconst scored = items.map(item => {\n  const json = item.json;\n  \n  const title = json.title || json.headline || '';\n  const summary = json.contentSnippet || json.description || json.content || '';\n  const link = json.link || json.url || '';\n  const pubDate = json.pubDate || json.isoDate || json.publishedAt || now.toISOString();\n  const source = json.creator || json.source?.name || 'RSS';\n  \n  const published = new Date(pubDate);\n  const hoursAgo = (now - published) / (1000 * 60 * 60);\n  const freshnessScore = Math.exp(-hoursAgo / 12);\n  \n  const keywords = ['e-bike', 'ebike', 'electric bike', 'cycling', 'bicycle', 'bike insurance', 'bike safety'];\n  const text = (title + ' ' + summary).toLowerCase();\n  const keywordHits = keywords.filter(kw => text.includes(kw)).length;\n  const relevanceScore = Math.min(1, keywordHits / 3);\n  \n  const hotScore = (freshnessScore * 0.5) + (relevanceScore * 0.5);\n  \n  return {\n    json: {\n      title,\n      summary: summary.slice(0, 500),\n      link,\n      published: pubDate,\n      source,\n      hoursAgo: Math.round(hoursAgo * 10) / 10,\n      freshnessScore: Math.round(freshnessScore * 100) / 100,\n      relevanceScore: Math.round(relevanceScore * 100) / 100,\n      hotScore: Math.round(hotScore * 100) / 100\n    }\n  };\n});\n\nscored.sort((a, b) => b.json.hotScore - a.json.hotScore);\nreturn scored.slice(0, 3);"
+      },
+      "id": "scoring",
+      "name": "Score & Rank (Top 3)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "hot-score-filter",
+              "leftValue": "={{ $json.hotScore }}",
+              "rightValue": 0.3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter",
+      "name": "Filter hot > 0.3",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [920, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\nconst title = item.json.title || '';\nconst link = item.json.link || '';\n\nlet mockTweet = title;\nif (mockTweet.length > 200) {\n  mockTweet = mockTweet.slice(0, 197) + '...';\n}\n\nconst hashtags = [];\nconst text = title.toLowerCase();\nif (text.includes('e-bike') || text.includes('ebike') || text.includes('electric')) {\n  hashtags.push('#EBike');\n}\nif (text.includes('cycling') || text.includes('bicycle') || text.includes('bike')) {\n  hashtags.push('#Cycling');\n}\nif (hashtags.length === 0) {\n  hashtags.push('#BikeNews');\n}\n\nconst tweetText = `${mockTweet} ${hashtags.slice(0, 2).join(' ')}`;\n\nreturn {\n  json: {\n    tweet: tweetText,\n    link: link,\n    originalTitle: title,\n    hotScore: item.json.hotScore,\n    fullTweet: `${tweetText}\\n\\n${link}`\n  }\n};"
+      },
+      "id": "mock-openai",
+      "name": "MOCK Rewrite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all tweets into one email\nconst items = $input.all();\n\nconst tweets = items.map((item, i) => {\n  const t = item.json;\n  return `\n--- Tweet #${i + 1} (score: ${t.hotScore}) ---\n\n${t.fullTweet}\n`;\n}).join('\\n');\n\nconst now = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });\n\nreturn [{\n  json: {\n    subject: `Hot News Digest - ${now}`,\n    body: `Привет!\\n\\nВот ${items.length} горячих новостей для публикации в Twitter:\\n${tweets}\\n\\n---\\nСгенерировано автоматически`,\n    tweetsCount: items.length\n  }\n}];"
+      },
+      "id": "format-email",
+      "name": "Format Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 100]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ /*REPLACE_WITH_YOUR_EMAIL*/ 'your@email.com' }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1580, 100]
+    },
+    {
+      "parameters": {
+        "content": "## News Curator (Email)\n\n**Flow:**\nRSS + NewsAPI → Score → Rewrite → Email\n\n**Настройка:**\n1. Кликни на Send Email\n2. Замени 'your@email.com' на свой\n3. Создай SMTP credential\n\n**SMTP бесплатно:**\n- Gmail: smtp.gmail.com:587\n- Нужен App Password",
+        "height": 260,
+        "width": 280
+      },
+      "id": "sticky-note",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -100]
+    }
+  ],
+  "connections": {
+    "Schedule (8h)": {
+      "main": [
+        [
+          {
+            "node": "RSS Electrek",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Road.cc",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NewsAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Electrek": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Road.cc": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NewsAPI": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All": {
+      "main": [
+        [
+          {
+            "node": "Score & Rank (Top 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Rank (Top 3)": {
+      "main": [
+        [
+          {
+            "node": "Filter hot > 0.3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter hot > 0.3": {
+      "main": [
+        [
+          {
+            "node": "MOCK Rewrite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MOCK Rewrite": {
+      "main": [
+        [
+          {
+            "node": "Format Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1
+}

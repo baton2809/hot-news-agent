@@ -30,6 +30,7 @@ data/*.csv
 # Credentials
 *.json
 !package.json
+!n8n/workflows/**/*.json
 credentials/
 
 # Logs

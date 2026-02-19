@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from scoring.hot_score import HotScoreCalculator, NewsItem
 from scoring.embeddings import get_embedding
 from rewrite.llm_rewriter import LLMRewriter
+from integrations.slack import SlackModerator
 
 app = FastAPI(title="News Curator API", version="1.0.0")
 
@@ -32,6 +33,14 @@ app.add_middleware(
 # Глобальные объекты
 scorer = HotScoreCalculator()
 rewriter = LLMRewriter()
+slack_moderator = None
+
+# Инициализация Slack (опционально)
+if os.getenv('SLACK_WEBHOOK_URL'):
+    try:
+        slack_moderator = SlackModerator()
+    except Exception as e:
+        print(f"Warning: Slack integration disabled - {e}")
 
 
 class NewsItemRequest(BaseModel):
@@ -84,6 +93,19 @@ class RewriteResponse(BaseModel):
     length: int
 
 
+class SlackModerationRequest(BaseModel):
+    """Запрос на отправку в Slack для модерации."""
+    news_items: List[dict]
+    channel: Optional[str] = None
+
+
+class SlackModerationResponse(BaseModel):
+    """Ответ Slack модерации."""
+    ok: bool
+    message: str
+    items_sent: int
+
+
 @app.get("/")
 def root():
     """Health check."""
@@ -100,8 +122,10 @@ def health():
     return {
         "status": "healthy",
         "openai_key": "set" if os.getenv("OPENAI_API_KEY") else "missing",
+        "slack_webhook": "set" if os.getenv("SLACK_WEBHOOK_URL") else "missing",
         "scorer": "ready",
-        "rewriter": "ready"
+        "rewriter": "ready",
+        "slack_moderator": "ready" if slack_moderator else "disabled"
     }
 
 
@@ -231,6 +255,46 @@ async def score_and_rewrite(request: ScoreRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Combined error: {str(e)}")
+
+
+@app.post("/slack/moderation", response_model=SlackModerationResponse)
+async def send_to_slack_moderation(request: SlackModerationRequest):
+    """
+    Отправка новостей в Slack для модерации.
+
+    Новости будут отправлены с кнопками "Одобрить" и "Отклонить".
+    """
+    try:
+        if not slack_moderator:
+            raise HTTPException(
+                status_code=503,
+                detail="Slack integration not configured. Set SLACK_WEBHOOK_URL env variable."
+            )
+
+        if not request.news_items:
+            raise HTTPException(status_code=400, detail="No news items provided")
+
+        result = slack_moderator.send_for_moderation(
+            news_items=request.news_items,
+            channel=request.channel
+        )
+
+        if not result.get('ok'):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Slack API error: {result.get('error', 'Unknown error')}"
+            )
+
+        return SlackModerationResponse(
+            ok=True,
+            message="News sent to Slack for moderation",
+            items_sent=len(request.news_items)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Slack moderation error: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,288 @@
+{
+  "name": "News Curator MVP",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 8
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule (8h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://electrek.co/feed/"
+      },
+      "id": "rss-electrek",
+      "name": "RSS Electrek",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, -100]
+    },
+    {
+      "parameters": {
+        "url": "https://road.cc/feed"
+      },
+      "id": "rss-roadcc",
+      "name": "RSS Road.cc",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [220, 100]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "e-bike OR \"electric bicycle\" OR \"cycling safety\""
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "pageSize",
+              "value": "10"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $env.NEWSAPI_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "newsapi",
+      "name": "NewsAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": []
+        },
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "merge",
+      "name": "Merge All",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [480, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize and score news items\nconst items = $input.all();\nconst now = new Date();\n\nconst scored = items.map(item => {\n  const json = item.json;\n  \n  // Extract fields (RSS vs NewsAPI have different structures)\n  const title = json.title || json.headline || '';\n  const summary = json.contentSnippet || json.description || json.content || '';\n  const link = json.link || json.url || '';\n  const pubDate = json.pubDate || json.isoDate || json.publishedAt || now.toISOString();\n  const source = json.creator || json.source?.name || 'RSS';\n  \n  // Calculate freshness score: e^(-hours/12)\n  const published = new Date(pubDate);\n  const hoursAgo = (now - published) / (1000 * 60 * 60);\n  const freshnessScore = Math.exp(-hoursAgo / 12);\n  \n  // Simple keyword relevance score\n  const keywords = ['e-bike', 'ebike', 'electric bike', 'cycling', 'bicycle', 'bike insurance', 'bike safety'];\n  const text = (title + ' ' + summary).toLowerCase();\n  const keywordHits = keywords.filter(kw => text.includes(kw)).length;\n  const relevanceScore = Math.min(1, keywordHits / 3);\n  \n  // Hot score (simplified: 50% freshness, 50% relevance)\n  const hotScore = (freshnessScore * 0.5) + (relevanceScore * 0.5);\n  \n  return {\n    json: {\n      title,\n      summary: summary.slice(0, 500),\n      link,\n      published: pubDate,\n      source,\n      hoursAgo: Math.round(hoursAgo * 10) / 10,\n      freshnessScore: Math.round(freshnessScore * 100) / 100,\n      relevanceScore: Math.round(relevanceScore * 100) / 100,\n      hotScore: Math.round(hotScore * 100) / 100\n    }\n  };\n});\n\n// Sort by hot score and return top 5\nscored.sort((a, b) => b.json.hotScore - a.json.hotScore);\nreturn scored.slice(0, 5);"
+      },
+      "id": "scoring",
+      "name": "Score & Rank",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "hot-score-filter",
+              "leftValue": "={{ $json.hotScore }}",
+              "rightValue": 0.3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter",
+      "name": "Filter hot > 0.3",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [920, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a social media manager. Rewrite news as Twitter posts (max 260 chars). Professional but engaging tone. Add 1-2 hashtags. Do NOT copy original text. Max 1 emoji. Include a hook in the first line. Return ONLY the tweet text, nothing else.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Rewrite this news:\\n\\nTitle: {{ $json.title }}\\n\\nSummary: {{ $json.summary }}\"\n    }\n  ],\n  \"temperature\": 0.8,\n  \"max_tokens\": 150\n}"
+      },
+      "id": "openai-rewrite",
+      "name": "OpenAI Rewrite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1140, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\nconst openaiResponse = item.json;\n\n// Extract tweet text from OpenAI response\nlet tweetText = openaiResponse.choices?.[0]?.message?.content || '';\ntweetText = tweetText.trim();\n\n// Ensure it's under 280 chars (leave room for link)\nif (tweetText.length > 250) {\n  tweetText = tweetText.slice(0, 247) + '...';\n}\n\n// Get original data from previous node\nconst original = $('Score & Rank').item;\n\nreturn {\n  json: {\n    tweet: tweetText,\n    link: original.json.link,\n    originalTitle: original.json.title,\n    hotScore: original.json.hotScore,\n    source: original.json.source,\n    fullTweet: tweetText + '\\n\\n' + original.json.link\n  }\n};"
+      },
+      "id": "format-tweet",
+      "name": "Format Tweet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 100]
+    },
+    {
+      "parameters": {
+        "content": "## News Curator MVP\n\n**Flow:**\n1. Schedule: every 8 hours\n2. Collect from RSS + NewsAPI\n3. Score by freshness + relevance\n4. Filter: hotScore > 0.3\n5. Rewrite via OpenAI\n6. Output ready tweets\n\n**Setup:**\n1. Set environment variables:\n   - NEWSAPI_KEY\n   - OPENAI_API_KEY\n\n2. For Twitter posting, add Twitter node after \"Format Tweet\"\n\n**Test:** Click \"Test workflow\" to run manually",
+        "height": 340,
+        "width": 280
+      },
+      "id": "sticky-note",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -100]
+    }
+  ],
+  "connections": {
+    "Schedule (8h)": {
+      "main": [
+        [
+          {
+            "node": "RSS Electrek",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS Road.cc",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NewsAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Electrek": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Road.cc": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NewsAPI": {
+      "main": [
+        [
+          {
+            "node": "Merge All",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All": {
+      "main": [
+        [
+          {
+            "node": "Score & Rank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Rank": {
+      "main": [
+        [
+          {
+            "node": "Filter hot > 0.3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter hot > 0.3": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Rewrite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Rewrite": {
+      "main": [
+        [
+          {
+            "node": "Format Tweet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1
+}
